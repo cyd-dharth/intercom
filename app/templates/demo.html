@@ -1,0 +1,44 @@
+<!doctype html>
+<html>
+<head>
+<meta charset="utf-8">
+<title>Acme Widgets, Co.</title>
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<style>
+  body { font-family: -apple-system, Segoe UI, Arial, sans-serif; margin: 0; color: #222; }
+  header { padding: 20px 40px; border-bottom: 1px solid #eee; display: flex; justify-content: space-between; align-items: center; }
+  header .brand { font-weight: 700; font-size: 18px; }
+  main { max-width: 720px; margin: 60px auto; padding: 0 20px; }
+  h1 { font-size: 32px; }
+  .note { background: #fffbe6; border: 1px solid #f0e2a4; border-radius: 8px; padding: 16px 20px; margin-top: 30px; font-size: 14px; }
+  .note code { background: #f2f2f2; padding: 1px 5px; border-radius: 4px; }
+  footer { padding: 40px; text-align: center; color: #999; font-size: 13px; }
+</style>
+</head>
+<body>
+<header>
+  <div class="brand">Acme Widgets, Co.</div>
+  <div>Pricing &middot; Docs &middot; Support</div>
+</header>
+<main>
+  <h1>Widgets for every occasion.</h1>
+  <p>Acme Widgets makes the finest artisanal widgets on the market. Browse our catalog,
+  read the docs, or just admire this placeholder marketing copy while you try the chat
+  bubble in the bottom right corner.</p>
+
+  <div class="note">
+    <strong>For the evaluator:</strong> this page has the real chat widget installed via a single
+    script tag, same as a customer's production site would. Click the bubble in the bottom
+    right to start a chat. Open the dashboard inbox in another tab or window, logged in
+    as an agent in this workspace, and reply from there. Messages, typing indicators, and
+    presence should sync in both directions in well under a second. Refresh this page and
+    your chat history persists (it is keyed to a visitor id in <code>localStorage</code>).
+    Closing your network for a bit and reopening it will resync any missed messages with
+    no duplicates.
+  </div>
+</main>
+<footer>This is a demo storefront built only to host the chat widget for evaluation.</footer>
+
+<script src="/static/widget.js" data-key="{{ public_key }}" async></script>
+</body>
+</html>

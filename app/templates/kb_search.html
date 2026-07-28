@@ -1,0 +1,42 @@
+<!doctype html>
+<html>
+<head>
+<meta charset="utf-8">
+<title>Search - {{ workspace.name }} Help Center</title>
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<style>
+  body { font-family: -apple-system, Segoe UI, Arial, sans-serif; margin: 0; color: #222; background: #fafafa; }
+  header { padding: 24px 40px; border-bottom: 1px solid #eee; background: #fff; }
+  header .brand { font-weight: 700; font-size: 20px; }
+  header a { color: #222; text-decoration: none; }
+  main { max-width: 800px; margin: 0 auto; padding: 30px 20px 80px; }
+  form.search { margin-bottom: 30px; display: flex; gap: 8px; }
+  form.search input { flex: 1; padding: 10px 14px; font-size: 15px; border: 1px solid #ddd; border-radius: 6px; }
+  form.search button { padding: 10px 18px; font-size: 15px; border: none; background: #222; color: #fff; border-radius: 6px; cursor: pointer; }
+  .result { display: block; padding: 14px 16px; background: #fff; border: 1px solid #eee; border-radius: 6px; margin-bottom: 10px; text-decoration: none; color: #222; }
+  .result h3 { margin: 0 0 6px; font-size: 16px; }
+  .result p { margin: 0; color: #666; font-size: 14px; }
+  .empty { color: #999; padding: 40px 0; text-align: center; }
+</style>
+</head>
+<body>
+<header><a href="/kb/public/{{ workspace_slug }}"><div class="brand">{{ workspace.name }} Help Center</div></a></header>
+<main>
+  <form class="search" action="/kb/public/{{ workspace_slug }}/search/results" method="get">
+    <input type="text" name="q" value="{{ query }}" placeholder="Search articles..." minlength="1" required>
+    <button type="submit">Search</button>
+  </form>
+
+  {% if results %}
+    {% for r in results %}
+    <a class="result" href="/kb/public/{{ workspace_slug }}/{{ r.slug }}">
+      <h3>{{ r.title }}</h3>
+      <p>{{ r.snippet }}</p>
+    </a>
+    {% endfor %}
+  {% else %}
+    <div class="empty">No matching articles for "{{ query }}".</div>
+  {% endif %}
+</main>
+</body>
+</html>

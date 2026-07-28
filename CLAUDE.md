@@ -2,7 +2,7 @@
 
 ## 0. Mission
 
-Build a multi tenant customer communication platform (an Intercom clone) as a hiring assignment. Hard deadline: under 24 hours of build time. It must be deployed and testable by a stranger who signs up fresh.
+Build a multi tenant customer communication platform (an Intercom clone) as a hiring assignment. Hard deadline: under 24 hours of build time. It must be deployed and testable by a stranger who signs up fresh. Keep the app name as Intercom
 
 Optimise for: correct system design, visible AI engineering, working end to end flows.
 Do not optimise for: pixel perfect UI, test coverage, abstraction, feature completeness beyond the list below.
@@ -787,3 +787,214 @@ The README is graded. Write it last but do not rush it. Required sections:
 No analytics dashboard, no SLA tracking, no canned responses, no webhooks, no public REST API, no file uploads, no attachment storage, no OAuth, no password reset flow, no email verification on signup, no rich text WYSIWYG editor (markdown textarea only), no dark mode, no mobile app, no i18n, no Kubernetes, no Terraform, no Redis, no Celery, no Alembic, no test suite beyond the isolation tests and one message ordering test.
 
 If you find yourself building something not listed in sections 5 through 15, stop and reconsider the time budget.
+
+
+## 19. Build log
+
+### Phase 1 complete (verified)
+Key shapes phase 2 must build on:
+- Session auth: `app/deps.py` exposes `current_user` and `current_workspace`
+- Repository convention: `async def fn(conn, workspace_id, ...)` returns asyncpg Records
+- Transaction helper: `app/db.py` `tx()` async context manager
+- Any deviation from CLAUDE.md sections 3 to 5, listed here
+
+### Phase 2 complete (verified)
+Built: `app/realtime/{hub,bus,routes}.py`, `app/repositories/{contacts,conversations,messages,read_state}.py`,
+`app/services/conversations.py` (send_message with the seq transaction, idempotency, assign, snooze, resolve),
+`app/api/{widget,conversations}.py`, `static/widget.js`, `app/templates/{widget,demo}.html`, React `Inbox.tsx` and `ws.ts`.
+
+Deviations and notes for phase 3:
+- No JWT library added. Visitor tokens are a hand rolled HMAC signed payload in `security.py`
+  (`issue_visitor_token` / `verify_visitor_token`), same shape as a JWT but no new dependency,
+  30 minute TTL per section 8.
+- `/ws/agent` reads the session token from the `session` cookie (browsers send it automatically
+  on same origin WS upgrades), falling back to a `?token=` query param for scripted testing only.
+- Snooze auto-reopen is a simple 30 second polling sweeper task in `main.py`
+  (`_snooze_sweeper`), not yet the `unsnooze` job kind. Replace with a real job in phase 3
+  once the job worker loop exists; the `jobs` table and dispatch pattern are unchanged.
+- `app/repositories/conversations.py` `list_inbox` aliases the joined tables as `c` and `ct`;
+  always qualify columns in that query when extending filters, asyncpg raises
+  `AmbiguousColumnError` otherwise (hit and fixed during phase 2 verification).
+- Verified end to end against the running `docker compose` stack: signup, widget session
+  creation, visitor-to-agent realtime delivery, idempotent retry (no duplicate insert or
+  broadcast on repeated `client_msg_id`), reply from dashboard, assign, resolve.
+
+
+### Phase 3 complete (verified)
+Built: `app/repositories/jobs.py` (enqueue, claim_one, mark_done, mark_failed),
+`app/jobs/{worker.py,handlers.py}`, `app/email/{client,outbound,inbound,poller}.py`,
+`app/repositories/email_sync_state.py`, `app/api/admin.py` (job counts), replaced the
+phase 2 snooze sweeper with a real `unsnooze` job enqueued from `set_conversation_status`.
+
+Key shapes phase 4 must build on:
+- `jobs_repo.enqueue(conn, kind, payload, workspace_id=None, dedupe_key=None,
+  run_after_seconds=0)` JSON-encodes the payload itself (`json.dumps`), and the worker
+  JSON-decodes it before dispatch (`app/jobs/worker.py`). asyncpg has no jsonb codec
+  registered on this pool, so any new job kind's payload must go through this same
+  enqueue/claim path, never a hand rolled insert.
+- `send_message` in `app/services/conversations.py` is the single insert path for both
+  channels. Agent replies on an `email` channel conversation get a generated
+  `Message-ID` (`app/email/outbound.build_message_id`) and enqueue a `send_email` job
+  in the same transaction as the message insert (outbox pattern). Do the equivalent
+  for any future channel that needs an async side effect tied to a message.
+- Email threading resolution (`app/email/inbound.py`) runs in workspace-agnostic order:
+  (1) `References`/`In-Reply-To` against `messages.email_message_id` globally
+  (`find_by_email_message_id_any_workspace`), (2) the Reply-To `+cXXXXXXXX.hmac10` token
+  against conversation ids globally (`find_by_short_id_prefix_any_workspace`), verified
+  by HMAC before trusting it, (3) only once neither matched does it resolve a workspace
+  via the `+ws{slug}` tag or `EMAIL_FALLBACK_WORKSPACE_SLUG`, then tries a normalised
+  subject + sender match scoped to that workspace. This deviates from a first draft that
+  resolved the workspace before trying steps 1 and 2, which silently dropped every reply
+  that lacked a `+ws` tag (i.e. every normal reply a real mail client sends). The two
+  `_any_workspace` repo functions are the only unscoped tenant queries in the codebase;
+  their docstrings say why and they must never be used for anything else.
+- The IMAP poller (`app/email/poller.py`) does the blocking `imaplib` fetch in
+  `asyncio.to_thread`, advances `email_sync_state.last_uid` even when a single message
+  fails processing (logged and skipped, never stalls the poller).
+- Verified end to end against the real Gmail account and the deployed Supabase Postgres
+  instance (the local `docker-compose` `db` service is not what `DATABASE_URL` points
+  at in this environment): inbound email routed by `+ws{slug}` tag, agent reply sent
+  through the job queue, a reply using only the Reply-To token matched via
+  `reply_to_token`, and a reply with real `In-Reply-To`/`References` headers matched via
+  `in_reply_to_references`, both landing in the same conversation. See the chat log for
+  the exact commands used; not reproduced here since they were throwaway test emails
+  rather than app code.
+
+### Phase 4 complete (verified imports and typecheck; not yet run against a live DB)
+Built: `app/repositories/{kb,ai}.py`, `app/ai/{client,budget,schemas,prompts,summarizer,
+retrieval}.py`, `app/services/kb.py`, `app/api/{kb,kb_public}.py`, widget suggest endpoint
+in `app/api/widget.py`, `embed_article`/`summarize` job handlers in `app/jobs/handlers.py`,
+`app/templates/{kb_index,kb_article,kb_search}.html`, React `Kb.tsx`, `KbEditor.tsx`,
+`SettingsAi.tsx`, and the AI summary card wired into `Inbox.tsx`.
+
+Key shapes phase 5 must build on:
+- `app/db.py` now registers a pgvector codec (`pgvector.asyncpg.register_vector`) and a
+  jsonb codec on every pooled connection via asyncpg's `init` hook. Repository functions
+  pass Python `list[float]` for `vector` columns and plain `dict`/`list` for `jsonb`
+  columns directly as query params, never `json.dumps` by hand. This changed
+  `app/repositories/jobs.py` (`enqueue` no longer dumps the payload) and
+  `app/jobs/worker.py` (`_run_one_claim` no longer `json.loads`s it back); any new
+  jsonb or vector column follows the same pattern with no repo-level workaround.
+- The incremental summariser (`app/ai/summarizer.py`) is the one place implementing the
+  section 10.2 watermark algorithm: `refresh_summary` loads `covered_through_seq`,
+  fetches only `messages.seq > covered_through_seq` capped at 30 and truncated at 2000
+  chars per message (middle truncation, head and tail kept), prompts with only that
+  delta plus the previous summary as JSON, and upserts a new watermark. This is also
+  where the section 10.5 degradation ladder lives: LLM failure keeps the previous
+  stored row untouched, no previous row plus LLM unavailable falls through to
+  `_extractive_summary` (first contact message, last 3 messages, `confidence: 0.3`,
+  `generator: "extractive"`). Both the dashboard's manual regenerate button and the
+  `summarize` job call the same function, so there is exactly one code path.
+- Two independent trigger rules enqueue the same `summarize` job kind, both keyed by
+  `dedupe_key=f"summary:{conversation_id}"` so the partial unique index on `jobs`
+  collapses repeats into the debounce described in section 10.2: (1)
+  `_maybe_enqueue_summary_on_new_message` in `app/services/conversations.py`, called
+  from `send_message` after the broadcast, fires when `last_seq - covered_through_seq
+  >= 5` with a 20 second `run_after`; (2) the `GET /conversations/{id}` handler in
+  `app/api/conversations.py` fires immediately (no delay) when `message_count >= 6` and
+  there is anything uncovered, serving whatever is already stored in the same response
+  rather than blocking on the enqueue. Conversations under 6 messages never call the
+  LLM at all, per spec.
+- `app/ai/client.py generate_json` follows the exact CLAUDE.md section 10.1 ladder:
+  budget check, primary call, one schema-validation repair retry (same model), fallback
+  model only on a primary call exception (timeout/5xx), a 5 consecutive failure circuit
+  breaker that opens for 60 seconds. It always writes one `ai_calls` row regardless of
+  outcome and never raises into the caller. Price table is hardcoded per model in
+  `_PRICE_PER_MILLION_TOKENS_USD`, since the provider exposes no pricing API.
+  `embed_text` is a separate, simpler failure path (no budget check, no circuit
+  breaker) since embeddings are cheap and retrieval already degrades to lexical-only
+  on any embedding failure.
+- `app/ai/retrieval.py hybrid_search` is the one function powering both the public KB
+  search page (`app/api/kb_public.py`) and the widget auto suggest endpoint
+  (`POST /api/widget/suggest`), per the "one code path, two surfaces" instruction in
+  section 10.3. Query embeddings are cached in an in-process `OrderedDict` LRU
+  (`QUERY_EMBEDDING_CACHE_SIZE = 256`) keyed by the whitespace-normalised, lowercased
+  query. If embedding fails, `vector_rows` is just empty and RRF runs on lexical only,
+  no special-casing needed since the fusion step already tolerates one empty list.
+- `app/services/kb.py build_chunks` splits on markdown headings first, then packs each
+  section's sentences to `MAX_CHUNK_CHARS = 1600` chars (~400 tokens) keeping the last
+  sentence of a chunk as the first sentence of the next (the 1-sentence overlap from
+  section 10.3), and prepends `"{title} > {heading}"` to every chunk's content so a
+  lone chunk reads standalone in a search result. `publish_article` sets status,
+  replaces all chunks in one transaction (`kb_repo.replace_chunks`), and enqueues
+  `embed_article` (dedupe key `embed_article:{article_id}`) only if there is at least
+  one chunk. The `embed_article` job handler embeds chunks missing an embedding one at
+  a time and leaves any that fail embedding as `embedding is null`, which
+  `vector_search` already excludes, so a partial embedding failure degrades that one
+  chunk to lexical-only rather than failing the whole article.
+- `sanitize_html` (nh3 allowlist) lives in `app/services/kb.py`, not the API layer,
+  because both the dashboard's live markdown preview (`POST /kb/preview`) and the
+  public article page (`app/api/kb_public.py kb_article`) call it, and per section 15
+  this is the one real XSS surface in the product.
+- Deviation: config.py (already present before this phase, not changed here) had
+  `embedding_model = "gemini-embedding-2"` and `embedding_dimensions = 1536` rather
+  than the `text-embedding-004` / 768 dims named in CLAUDE.md section 4. `db/schema.sql`
+  `kb_chunks.embedding` was already `vector(1536)` to match; phase 4 code (chunking,
+  embed job, hybrid search) is written dimension-agnostic and works against whatever
+  `settings.embedding_model` and the schema's column width actually are, so this
+  pre-existing deviation needed no further change, just noting it here since section 4
+  says something different.
+- Not yet run against a live database or a real Gemini API key in this session: verified
+  by `python -m py_compile` on every touched/new module, a full `app.main` import with a
+  fake `DATABASE_URL` (catches missing imports and circular imports, not runtime SQL
+  correctness), and `tsc --noEmit` on the web app. `pgvector` and `google-genai` were
+  added to `requirements.txt` and installed into the local `.venv` for that import
+  check; installing `google-genai` downgraded `websockets` from 16.1.1 to 15.0.1 in that
+  venv, which is compatible with the pinned `uvicorn[standard]==0.34.0` but worth
+  re-checking if `uvicorn` or `google-genai` versions move. The next session should run
+  the full phase 4 acceptance check end to end against `docker compose up`.
+
+### Phase 5 complete (verified against the live Supabase Postgres instance)
+Built: `tests/{test_isolation,test_message_ordering}.py`, `pytest.ini`, `scripts/seed.py`,
+`app/repositories/domains.py`, `app/services/domains.py`, `app/api/domains.py`,
+`handle_verify_domain` in `app/jobs/handlers.py`, the custom domain routing middleware
+in `app/main.py`, React `SettingsDomains.tsx`, and this README.
+
+Key notes for future sessions:
+- The four tenant isolation tests and the message ordering/idempotency tests in
+  `tests/` run against the real deployed database (there is no separate test database
+  in this environment), and clean up the workspaces they create themselves. All 6 pass.
+- `scripts/seed.py` originally seeded the demo admin as `admin@demo.local`. `.local` is
+  a reserved TLD that Pydantic's `EmailStr` rejects, so the row existed in the database
+  but `POST /api/auth/login` 422'd on it, silently breaking the documented test
+  credentials for anyone actually trying them through the API or dashboard rather than
+  querying the database directly. Fixed to `admin@demo.example`. Any future seeded
+  email address must be checked against a real login call, not just a successful
+  insert, since pydantic-level validation and database constraints are not the same
+  gate.
+- Custom domains (section 12) followed the brief's stubbed-provisioning allowance
+  exactly: `app/services/domains.py` only ever performs DNS resolution
+  (`dnspython`, both CNAME and TXT) and never touches a certificate. The 60 second,
+  10 attempt reschedule for `verify_domain` is deliberately not built on the generic
+  job retry/backoff in `app/jobs/worker.py` (`mark_failed`, exponential, exception
+  triggered), because a DNS check that has not yet succeeded is not an exception, it is
+  the expected state while a customer is still editing DNS. Attempt counting instead
+  lives in the job's own payload (`attempt`), and `handle_verify_domain` self-enqueues
+  the next attempt with a dedupe key that includes the attempt number
+  (`verify_domain:{domain_id}:{attempt}`), specifically so the self-enqueue never
+  collides with its own still-`running` row, which would otherwise be silently dropped
+  by the partial unique index on `jobs.dedupe_key`. Verified directly against the live
+  database: creating a domain returns the correct CNAME (derived from `APP_BASE_URL`'s
+  host) and TXT record instructions, the background worker picks up the first
+  `verify_domain` job and correctly records `last_error` while leaving status
+  `pending`, and calling `handle_verify_domain` at `attempt=10` on a hostname with no
+  real DNS correctly flips status to `failed` with the DNS error preserved.
+- Host header routing (section 12 step 3) is one more `@app.middleware("http")` layer
+  in `app/main.py`, added after the existing request-id middleware. It rewrites
+  `request.scope["path"]` to the equivalent `/kb/public/{slug}/...` route when the
+  incoming `Host` header matches a **verified** `custom_domains` row, before FastAPI's
+  router ever sees the original path. `domains_repo.get_verified_by_hostname` is the
+  only other unscoped-by-workspace query in the codebase besides the two documented in
+  phase 3, and for the same reason: the workspace is exactly what this lookup resolves,
+  and it only ever matches a verified row, so a spoofed or unverified Host header
+  cannot reach another tenant's KB through this path. Verified that `/kb/public/demo`,
+  `/healthz`, `/demo`, and `/widget` are unaffected by the new middleware.
+- `app/api/smoke.py`, which a prior instruction referenced as a debugging endpoint to
+  delete, does not exist anywhere in this repository (not on disk, not in git history,
+  not mounted in `main.py`, no references to "smoke" at all). Confirmed with the user
+  and skipped rather than inventing a file to delete.
+- Rate limits, input caps, and the isolation/ordering tests described as "phase 5
+  hardening" were actually already built in an earlier session before this one; this
+  session's own work was custom domains, the README, the seed email fix, and this log
+  entry. See the git history around this commit for the exact split.
+  

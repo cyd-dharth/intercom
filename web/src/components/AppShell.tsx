@@ -8,10 +8,13 @@ export default function AppShell() {
     <div className="h-screen flex flex-col">
       <header className="h-12 border-b bg-white flex items-center px-4 justify-between shrink-0">
         <div className="flex items-center gap-4">
-          <span className="font-semibold">Inbox</span>
+          <span className="font-semibold">Intercom</span>
           <nav className="flex gap-3 text-sm text-gray-600">
             <Link to="/inbox">Inbox</Link>
+            <Link to="/kb">Knowledge base</Link>
             <Link to="/settings/team">Team</Link>
+            <Link to="/settings/ai">AI</Link>
+            <Link to="/settings/domains">Domains</Link>
           </nav>
         </div>
         <div className="flex items-center gap-3 text-sm">

@@ -1,0 +1,263 @@
+<!doctype html>
+<html>
+<head>
+<meta charset="utf-8">
+<title>Chat</title>
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta http-equiv="Content-Security-Policy" content="frame-ancestors *">
+<style>
+  * { box-sizing: border-box; }
+  html, body { margin: 0; padding: 0; height: 100%; font-family: -apple-system, Segoe UI, Arial, sans-serif; font-size: 14px; }
+  body { display: flex; flex-direction: column; }
+  #header { padding: 12px 14px; background: #111; color: #fff; display: flex; justify-content: space-between; align-items: center; }
+  #status { font-size: 11px; color: #9c9; }
+  #status.offline { color: #c99; }
+  #messages { flex: 1; overflow-y: auto; padding: 12px; background: #f7f7f8; }
+  .msg { margin-bottom: 10px; display: flex; }
+  .msg.contact { justify-content: flex-end; }
+  .bubble { max-width: 78%; padding: 8px 12px; border-radius: 14px; white-space: pre-wrap; word-wrap: break-word; }
+  .msg.contact .bubble { background: #111; color: #fff; }
+  .msg.agent .bubble, .msg.system .bubble { background: #fff; border: 1px solid #e2e2e2; color: #222; }
+  #typing { font-size: 12px; color: #888; padding: 0 12px 6px; min-height: 16px; }
+  #suggestions { padding: 0 12px; }
+  #suggestions a { display: block; font-size: 12px; padding: 6px 8px; margin-bottom: 4px; background: #fff; border: 1px solid #e2e2e2; border-radius: 8px; text-decoration: none; color: #333; }
+  #composer { display: flex; padding: 10px; border-top: 1px solid #e2e2e2; background: #fff; }
+  #composer textarea { flex: 1; resize: none; border: 1px solid #ddd; border-radius: 8px; padding: 8px; font-family: inherit; font-size: 13px; height: 36px; }
+  #composer button { margin-left: 8px; border: none; background: #111; color: #fff; border-radius: 8px; padding: 0 14px; cursor: pointer; }
+  #closeBtn { background: none; border: none; color: #fff; font-size: 18px; cursor: pointer; }
+</style>
+</head>
+<body>
+<div id="header">
+  <div>
+    <div>Chat with us</div>
+    <div id="status">connecting...</div>
+  </div>
+  <button id="closeBtn" aria-label="Close">&times;</button>
+</div>
+<div id="messages"></div>
+<div id="typing"></div>
+<div id="suggestions"></div>
+<div id="composer">
+  <textarea id="input" placeholder="Type a message..." maxlength="10000"></textarea>
+  <button id="sendBtn">Send</button>
+</div>
+
+<script>
+(function () {
+  var params = new URLSearchParams(location.search);
+  var publicKey = params.get("key");
+  var visitorId = params.get("v");
+
+  var messagesEl = document.getElementById("messages");
+  var typingEl = document.getElementById("typing");
+  var statusEl = document.getElementById("status");
+  var inputEl = document.getElementById("input");
+  var sendBtn = document.getElementById("sendBtn");
+  var closeBtn = document.getElementById("closeBtn");
+  var suggestionsEl = document.getElementById("suggestions");
+
+  var conversationId = null;
+  var lastSeq = 0;
+  var visitorToken = null;
+  var workspaceSlug = null;
+  var ws = null;
+  var reconnectAttempt = 0;
+  var pendingQueue = [];
+  var unreadCount = 0;
+  var typingTimer = null;
+
+  closeBtn.addEventListener("click", function () {
+    parent.postMessage({ type: "widget.close" }, "*");
+  });
+
+  window.addEventListener("message", function (event) {
+    var data = event.data || {};
+    if (data.type === "widget.opened") {
+      unreadCount = 0;
+      parent.postMessage({ type: "widget.unread", count: 0 }, "*");
+    }
+  });
+
+  function addMessage(m) {
+    var row = document.createElement("div");
+    row.className = "msg " + m.sender_type;
+    var bubble = document.createElement("div");
+    bubble.className = "bubble";
+    bubble.textContent = m.body;
+    row.appendChild(bubble);
+    messagesEl.appendChild(row);
+    messagesEl.scrollTop = messagesEl.scrollHeight;
+  }
+
+  function uuidv4() {
+    return crypto.randomUUID();
+  }
+
+  function connectWs() {
+    var scheme = location.protocol === "https:" ? "wss" : "ws";
+    ws = new WebSocket(scheme + "://" + location.host + "/ws/widget?token=" + encodeURIComponent(visitorToken));
+
+    ws.onopen = function () {
+      reconnectAttempt = 0;
+      statusEl.textContent = "online";
+      statusEl.className = "";
+      if (conversationId) {
+        ws.send(JSON.stringify({ type: "subscribe", data: { conversation_id: conversationId } }));
+        ws.send(JSON.stringify({ type: "sync", data: { conversation_id: conversationId, since_seq: lastSeq } }));
+      }
+      flushQueue();
+    };
+
+    ws.onclose = function () {
+      statusEl.textContent = "we'll reply by email";
+      statusEl.className = "offline";
+      var delay = Math.min(1000 * Math.pow(2, reconnectAttempt), 15000) + Math.random() * 500;
+      reconnectAttempt++;
+      setTimeout(connectWs, delay);
+    };
+
+    ws.onmessage = function (event) {
+      var frame = JSON.parse(event.data);
+      handleFrame(frame);
+    };
+  }
+
+  function handleFrame(frame) {
+    if (frame.type === "message.new") {
+      var m = frame.data.message;
+      if (m.seq > lastSeq) lastSeq = m.seq;
+      addMessage(m);
+      if (m.sender_type === "agent") {
+        unreadCount++;
+        parent.postMessage({ type: "widget.unread", count: unreadCount }, "*");
+      }
+    } else if (frame.type === "sync.result") {
+      frame.data.messages.forEach(function (m) {
+        if (m.seq > lastSeq) lastSeq = m.seq;
+      });
+    } else if (frame.type === "typing") {
+      if (frame.data.actor_type === "agent") {
+        typingEl.textContent = frame.data.is_typing ? "Agent is typing..." : "";
+      }
+    } else if (frame.type === "presence") {
+      // no-op for widget, status reflects connection not agent presence
+    }
+  }
+
+  function flushQueue() {
+    if (ws.readyState !== WebSocket.OPEN) return;
+    while (pendingQueue.length) {
+      var frame = pendingQueue.shift();
+      ws.send(JSON.stringify(frame));
+    }
+  }
+
+  function sendMessage() {
+    var body = inputEl.value.trim();
+    if (!body) return;
+    var clientMsgId = uuidv4();
+    var frame = { type: "message.send", data: { conversation_id: conversationId, body: body, client_msg_id: clientMsgId } };
+    if (ws && ws.readyState === WebSocket.OPEN) {
+      ws.send(JSON.stringify(frame));
+    } else {
+      pendingQueue.push(frame);
+    }
+    inputEl.value = "";
+  }
+
+  sendBtn.addEventListener("click", sendMessage);
+  inputEl.addEventListener("keydown", function (e) {
+    if (e.key === "Enter" && !e.shiftKey) {
+      e.preventDefault();
+      sendMessage();
+      suggestionsEl.innerHTML = "";
+    } else {
+      sendTyping(true);
+    }
+  });
+  inputEl.addEventListener("blur", function () {
+    sendTyping(false);
+  });
+
+  var suggestTimer = null;
+  inputEl.addEventListener("input", function () {
+    clearTimeout(suggestTimer);
+    var value = inputEl.value.trim();
+    if (value.length < 12) {
+      suggestionsEl.innerHTML = "";
+      return;
+    }
+    suggestTimer = setTimeout(function () {
+      fetchSuggestions(value);
+    }, 400);
+  });
+
+  function fetchSuggestions(query) {
+    if (!visitorToken) return;
+    fetch("/api/widget/suggest", {
+      method: "POST",
+      headers: { "Content-Type": "application/json", Authorization: "Bearer " + visitorToken },
+      body: JSON.stringify({ q: query }),
+    })
+      .then(function (res) {
+        if (!res.ok) throw new Error("suggest failed");
+        return res.json();
+      })
+      .then(function (data) {
+        renderSuggestions(data.results || []);
+      })
+      .catch(function () {
+        // Suggestions degrade silently, per section 10.3: never blocks sending a message.
+        suggestionsEl.innerHTML = "";
+      });
+  }
+
+  function renderSuggestions(results) {
+    suggestionsEl.innerHTML = "";
+    if (!workspaceSlug) return;
+    results.forEach(function (r) {
+      var a = document.createElement("a");
+      a.href = "/kb/public/" + workspaceSlug + "/" + r.slug;
+      a.target = "_blank";
+      a.textContent = r.title;
+      suggestionsEl.appendChild(a);
+    });
+  }
+
+  function sendTyping(isTyping) {
+    if (!ws || ws.readyState !== WebSocket.OPEN || !conversationId) return;
+    ws.send(JSON.stringify({ type: "typing", data: { conversation_id: conversationId, is_typing: isTyping } }));
+    if (isTyping) {
+      clearTimeout(typingTimer);
+      typingTimer = setTimeout(function () {
+        ws.send(JSON.stringify({ type: "typing", data: { conversation_id: conversationId, is_typing: false } }));
+      }, 3000);
+    }
+  }
+
+  fetch("/api/widget/session", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ public_key: publicKey, visitor_id: visitorId }),
+  })
+    .then(function (res) {
+      if (!res.ok) throw new Error("session failed");
+      return res.json();
+    })
+    .then(function (data) {
+      visitorToken = data.visitor_token;
+      conversationId = data.conversation.id;
+      lastSeq = data.conversation.last_seq;
+      workspaceSlug = data.workspace.slug;
+      data.messages.forEach(addMessage);
+      connectWs();
+    })
+    .catch(function () {
+      statusEl.textContent = "unable to connect";
+      statusEl.className = "offline";
+    });
+})();
+</script>
+</body>
+</html>

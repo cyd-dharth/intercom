@@ -3,10 +3,12 @@ import uuid
 from fastapi import APIRouter, Request
 from pydantic import BaseModel, EmailStr
 
+from app.config import settings
 from app.db import get_pool
 from app.deps import current_membership, require_role
 from app.errors import ValidationAppError
 from app.repositories import invites as invites_repo
+from app.repositories import jobs as jobs_repo
 from app.repositories import members as members_repo
 from app.services import auth as auth_service
 
@@ -55,12 +57,21 @@ async def invite_member(workspace_id: uuid.UUID, body: InviteRequest, request: R
     async with pool.acquire() as conn:
         async with conn.transaction():
             invite, token = await auth_service.create_invite(conn, workspace_id, body.email, body.role, membership.user.id)
+            invite_url = f"{settings.app_base_url}/invite/{token}"
+            if settings.email_enabled():
+                await jobs_repo.enqueue(
+                    conn,
+                    kind="send_invite_email",
+                    payload={"workspace_id": str(workspace_id), "to_email": invite["email"], "invite_url": invite_url},
+                    workspace_id=workspace_id,
+                )
 
-    # NOTE: sending the invite email is out of scope for this build; the token
-    # is returned directly so the invite link can be shared manually in the demo.
+    # The token is still returned so the link can be shared manually as a fallback,
+    # e.g. if SMTP is not configured or the email is delayed.
     return {
         "invite": {"id": str(invite["id"]), "email": invite["email"], "role": invite["role"]},
         "invite_token": token,
+        "invite_url": invite_url,
     }
 
 

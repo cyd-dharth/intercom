@@ -1,0 +1,30 @@
+<!doctype html>
+<html>
+<head>
+<meta charset="utf-8">
+<title>{{ article.title }} - {{ workspace.name }} Help Center</title>
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<style>
+  body { font-family: -apple-system, Segoe UI, Arial, sans-serif; margin: 0; color: #222; background: #fafafa; }
+  header { padding: 24px 40px; border-bottom: 1px solid #eee; background: #fff; }
+  header .brand { font-weight: 700; font-size: 20px; }
+  header a { color: #222; text-decoration: none; }
+  main { max-width: 720px; margin: 0 auto; padding: 30px 20px 80px; background: #fff; }
+  .back { display: inline-block; margin-bottom: 20px; color: #666; font-size: 14px; text-decoration: none; }
+  h1 { font-size: 28px; margin-bottom: 20px; }
+  .content h2 { font-size: 20px; margin-top: 28px; }
+  .content h3 { font-size: 17px; margin-top: 22px; }
+  .content code { background: #f2f2f2; padding: 1px 5px; border-radius: 4px; }
+  .content pre { background: #f2f2f2; padding: 12px; border-radius: 6px; overflow-x: auto; }
+  .content p { line-height: 1.6; }
+</style>
+</head>
+<body>
+<header><a href="/kb/public/{{ workspace_slug }}"><div class="brand">{{ workspace.name }} Help Center</div></a></header>
+<main>
+  <a class="back" href="/kb/public/{{ workspace_slug }}">&larr; Back to all articles</a>
+  <h1>{{ article.title }}</h1>
+  <div class="content">{{ article_html | safe }}</div>
+</main>
+</body>
+</html>
