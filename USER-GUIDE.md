@@ -2,16 +2,7 @@
 
 ## What this app is
 
-A support inbox platform (similar to Intercom) where customers can reach your team through:
-
-- A chat widget on your website
-- Email support channel
-
-All conversations are collected into a single inbox dashboard managed by your team.
-
-Additional features:
-- Knowledge base management
-- AI-generated conversation summaries
+A support inbox platform where customers reach your team through a chat widget and email, and your team works every conversation from one unified inbox, with AI doing the busywork of keeping track of what's going on in each thread.
 
 ---
 
@@ -20,116 +11,92 @@ Additional features:
 Open:
 
 ```
-https://intercom-1006131400305.asia-south1.run.app/login
+https://intercom-domains-1006131400305.asia-east1.run.app/login
 ```
 
-Use the demo credentials:
+Demo credentials:
 
 ```
 Email: admin@demo.example
 Password: demopass123
 ```
 
-After login:
-- You will be redirected to the inbox dashboard.
-- The inbox is already populated with:
-  - 3 sample conversations
-  - 6 help articles
+Or click "Sign up" to create your own workspace from scratch. After login you land on the inbox, pre-populated with 3 sample conversations and 6 help articles.
 
 ---
 
-# 2. Start a conversation (Customer Chat Widget)
+# 2. The unified inbox (core workflow)
 
-To test the customer chat flow:
+Open `/inbox`. This is where the day-to-day work happens: every conversation from chat and email lands in one list, so your team never has to check two places.
 
-1. Open the demo page in a different browser or incognito window:
+- **Filter** by channel (chat/email), status (open/snoozed/resolved), or assignee, to work through exactly the slice you own
+- **Assign** a conversation to a teammate, ownership is explicit, not implicit
+- **Snooze** a conversation when you're waiting on something, it reopens automatically when the snooze period ends
+- **Resolve** once the conversation is done
+- Click into a conversation to see the full thread and reply from one composer, regardless of whether the customer wrote in over chat or email. Threading, ordering, and history all work identically across both.
 
-```
-http://localhost:8000/demo
-```
+This is the same inbox for both channels by design: an agent should never need to think about which system a message came from.
 
-2. You will see a demo product page with a chat launcher button.
+---
 
-3. Click the chat button, type a message, and send it.
+# 3. Chat widget
 
-4. Switch back to the admin dashboard:
+1. Open the demo page in a separate/incognito browser window: `.../demo`
+2. Click the chat launcher, type a message, and send it.
+3. Switch to the dashboard inbox: the new conversation appears instantly, no refresh.
+4. Reply from the dashboard, it appears in the widget instantly. Typing indicators show live in both directions.
 
-```
-http://localhost:8000/inbox
-```
+Message history persists per visitor, so returning visitors see their past conversation. Install on any site with one script tag:
 
-5. The new conversation will appear in the inbox in real time.
-
-6. Reply from the dashboard.
-
-7. The reply will instantly appear in the customer widget.
-
-## Chat flow
-
-```
-Customer Widget
-        |
-        v
-    Inbox Dashboard
-        |
-        v
-     Team Reply
-        |
-        v
-Customer Widget
+```html
+<script src="https://YOUR_HOST/widget.js" data-key="WORKSPACE_PUBLIC_KEY" async></script>
 ```
 
 ---
 
-# 3. Test the Email Channel
+# 4. Email channel
 
-Email support works only when email settings are configured in `.env`.
+Once `SUPPORT_EMAIL`/`SMTP_*`/`IMAP_*` are configured, email works into the same inbox as chat.
 
-Required configuration:
+1. Send an email to the support address (e.g. `sssid0708@gmail.com`).
+2. Wait up to 20 seconds, refresh the inbox. It appears as a new conversation (filter `Channel: email`).
+3. Reply from the dashboard. It's sent as a correctly threaded reply.
+4. Further replies from either side stay in the same conversation, matched automatically even if the customer's reply strips or mangles email headers.
 
-```
-SUPPORT_EMAIL
-SMTP_*
-IMAP_*
-```
+---
 
-Check configured support email:
+# 5. AI conversation summaries (core AI feature)
 
-```bash
-grep -E "^SUPPORT_EMAIL=" d:/Projects/Intercom/.env
-```
+This is the main AI feature in the product. Every conversation with 6+ messages gets a structured, LLM-generated summary shown in a card next to the thread:
 
-Example:
+- **What the customer wants**, what's been tried so far, current status, open questions, and a suggested next action, not just a wall of prose
+- **Updates incrementally** as the conversation grows: new messages are summarised and merged into the existing summary rather than reprocessing the whole thread from scratch every time, so it stays current without repeatedly re-reading everything that was already said
+- **Never blocks the inbox.** If the AI is temporarily unavailable, a basic fallback summary is shown instead of a spinner or an error, the inbox always works
+- A **Regenerate** button forces a fresh summary on demand
+- `/settings/ai` shows today's AI usage: number of calls, tokens, and cost, so AI spend is visible, not a black box
 
-```
-SUPPORT_EMAIL=sssid0708@gmail.com
-```
+Watch it work: open the 14-message seeded conversation in the demo workspace to see a fully formed summary, then send a few more messages and see it update live within about 30 seconds.
 
-## Test email workflow
+---
 
-1. From any email account, send a message to:
+# 6. Knowledge base and AI search
 
-```
-sssid0708@gmail.com
-```
+Open `/kb` to write and publish Markdown articles into categories.
 
-2. Wait up to 20 seconds.
+- Public pages at `/kb/public/<workspace-slug>` include a working search box
+- Inside the chat widget, typing a question (12+ characters) auto-suggests relevant articles as the customer types, before they even ask a human
 
-3. Refresh the dashboard inbox.
+Search itself is AI-assisted: it combines keyword matching with semantic (embedding-based) search, so it can surface the right article even when the customer's wording doesn't match the article's wording.
 
-4. The email appears as a new conversation.
+---
 
-5. Filter by:
+# 7. Custom domains
 
-```
-Channel: email
-```
+Serve your knowledge base from your own domain (e.g. `help.yourcompany.com`).
 
-6. Reply from the dashboard.
-
-7. The reply is sent back to the sender as a threaded email reply.
-
-8. Any further replies are automatically added to the same conversation.
+1. Go to `/settings/domains`, add your hostname, and create the CNAME and TXT records it gives you.
+2. Click "Check now" or wait for the automatic recheck. Status moves from Pending to Verified.
+3. Once verified, your domain serves the KB directly, no path prefix.
 
 ---
 
@@ -138,22 +105,20 @@ Channel: email
 | Action | Location |
 |---|---|
 | Login as admin | `/login` |
-| Admin email | `admin@demo.example` |
-| Admin password | `demopass123` |
-| Team inbox | `/inbox` |
-| Customer chat widget | `/demo` (use separate/incognito browser) |
-| Knowledge base edit | `/kb` |
+| Admin email / password | `admin@demo.example` / `demopass123` |
+| Unified inbox | `/inbox` |
+| Customer chat widget | `/demo` (separate/incognito browser) |
+| Knowledge base editor | `/kb` |
 | Public knowledge base | `/kb/public/demo` |
 | Test email | Send to `sssid0708@gmail.com` |
 | Invite teammate | `/settings/team` |
+| Custom domains | `/settings/domains` |
+| AI usage | `/settings/ai` |
 
 ---
 
-# Additional Testing
+# Additional things to try
 
-You can test:
-
-- Writing and editing knowledge base articles
-- Checking AI summaries on conversations
-- Managing team members
-- Handling multiple support channels from a unified inbox
+- Assign, snooze, and resolve a conversation, then filter the inbox to confirm the state
+- Send several new messages into an existing conversation and watch the AI summary update live
+- Publish a KB article, then find it via search on both the public page and inside the widget's auto-suggest
