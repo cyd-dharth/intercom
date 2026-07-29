@@ -18,9 +18,15 @@ DNS_LOOKUP_TIMEOUT_SECONDS = 5
 
 
 def cname_target() -> str:
-    """The host a customer's CNAME record must point at, per section 12 step 1. Derived
-    from APP_BASE_URL rather than hardcoded so it tracks wherever this instance is
-    actually deployed."""
+    """The host a customer's CNAME record must point at, per section 12 step 1. Defaults
+    to APP_BASE_URL's own host so it tracks wherever this instance is deployed. Set
+    CUSTOM_DOMAIN_CNAME_TARGET to override this once a Cloud Run (or similar) domain
+    mapping is in place, since that mapping requires the CNAME to point at a fixed
+    provider hostname (e.g. ghs.googlehosted.com) rather than the raw service URL, in
+    order to get a real TLS cert for the customer's hostname instead of routing to a
+    host whose certificate only covers the platform's own domain."""
+    if settings.custom_domain_cname_target:
+        return settings.custom_domain_cname_target
     return urlparse(settings.app_base_url).hostname or settings.app_base_url
 
 

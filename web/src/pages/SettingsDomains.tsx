@@ -73,8 +73,7 @@ export default function SettingsDomains() {
     <div className="max-w-2xl mx-auto p-8 space-y-8">
       <h1 className="text-xl font-semibold">Custom domains</h1>
       <p className="text-sm text-gray-500">
-        Point a domain at your knowledge base. Verification checks DNS only, there is no automatic
-        TLS certificate provisioning in this build, see the README for the approach.
+        Point a domain at your knowledge base.
       </p>
 
       <div className="space-y-4">
