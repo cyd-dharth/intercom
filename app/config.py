@@ -12,6 +12,7 @@ class Settings(BaseSettings):
     app_base_url: str = "http://localhost:8000"
     session_secret: str
     database_url: str
+    custom_domain_cname_target: str = "ghs.googlehosted.com"
 
     gemini_api_key: str = ""
     llm_model_primary: str = "gemini-2.0-flash"
